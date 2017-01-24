@@ -1640,28 +1640,76 @@ static void (^MPGetPreviewLoadingCompletionHandler(MPDocument *doc))()
 {
     // If the URL points to a nonexistent file, create automatically if
     // requested, or provide better error message.
-    if (url.isFileURL && ![url checkResourceIsReachableAndReturnError:NULL])
+    if (url.isFileURL)
     {
-        if (self.preferences.createFileForLinkTarget)
+        if (![url checkResourceIsReachableAndReturnError:NULL])
         {
-            NSDocumentController *controller =
-                [NSDocumentController sharedDocumentController];
-            [controller openUntitledDocumentForURL:url display:YES error:NULL];
-            return;
+            // try different markdown extensions from the bundle, e.g. .md, .markdown
+            NSURL *urlWithoutExtension = [url URLByDeletingPathExtension];
+            NSURL *correctedURL;
+            for (NSDictionary *dict in [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleDocumentTypes"])
+            {
+                NSArray *mimeTypes = [dict objectForKey:@"CFBundleTypeMIMETypes"];
+                if ([mimeTypes containsObject: @"text/x-markdown"])
+                {
+                    // first, assume URL has no extension - try adding the extensions from the bundle
+                    for (NSString *extension in [dict objectForKey:@"CFBundleTypeExtensions"])
+                    {
+                        correctedURL = [url URLByAppendingPathExtension:extension];
+                        if ([correctedURL checkResourceIsReachableAndReturnError:NULL]) {
+                            break;
+                        } else {
+                            correctedURL = NULL;
+                        }
+                    }
+                    if (correctedURL)
+                    {
+                        break;
+                    }
+                    
+                    // if we still didn't find a file, assume URL has a different markdown extension - try removing it and adding the extensions from the bundle
+                    for (NSString *extension in [dict objectForKey:@"CFBundleTypeExtensions"])
+                    {
+                        correctedURL = [urlWithoutExtension URLByAppendingPathExtension:extension];
+                        if ([correctedURL checkResourceIsReachableAndReturnError:NULL]) {
+                            break;
+                        } else {
+                            correctedURL = NULL;
+                        }
+                    }
+                    if (correctedURL)
+                    {
+                        break;
+                    }
+                }
+            }
+            if (correctedURL) {
+                url = correctedURL;
+            }
+            else
+            {
+                if (self.preferences.createFileForLinkTarget)
+                {
+                    NSDocumentController *controller =
+                    [NSDocumentController sharedDocumentController];
+                    [controller openUntitledDocumentForURL:url display:YES error:NULL];
+                    return;
+                }
+                
+                NSAlert *alert = [[NSAlert alloc] init];
+                NSString *template = NSLocalizedString(
+                                                       @"File not found at path:\n%@",
+                                                       @"preview navigation error message");
+                alert.messageText = [NSString stringWithFormat:template, url.path];
+                alert.informativeText = NSLocalizedString(
+                                                          @"Please check the path of your link is correct. Turn on "
+                                                          @"“Automatically create link targets” If you want MacDown to "
+                                                          @"create nonexistent link targets for you.",
+                                                          @"preview navigation error information");
+                [alert runModal];
+                return;
+            }
         }
-
-        NSAlert *alert = [[NSAlert alloc] init];
-        NSString *template = NSLocalizedString(
-            @"File not found at path:\n%@",
-            @"preview navigation error message");
-        alert.messageText = [NSString stringWithFormat:template, url.path];
-        alert.informativeText = NSLocalizedString(
-            @"Please check the path of your link is correct. Turn on "
-            @"“Automatically create link targets” If you want MacDown to "
-            @"create nonexistent link targets for you.",
-            @"preview navigation error information");
-        [alert runModal];
-        return;
     }
 
     // Try to open it.
